@@ -3,6 +3,8 @@ import type { CandidateSummary, CvBlock, Settings } from "../lib/types";
 import { extractJson, groqChat } from "../lib/groq";
 import { splitCvs } from "../lib/cv";
 import { copyText, exportCSV } from "../lib/download";
+import { extractDocxText } from "../lib/docx";
+import { extractPdfText } from "../lib/pdf";
 import { SAMPLE_CVS, SAMPLE_JD } from "../lib/demo";
 import { Bar, Btn, Card, Field, Spinner, areaCls, inputCls, useToast } from "../components/ui";
 import {
@@ -11,6 +13,7 @@ import {
   IconCheck,
   IconCopy,
   IconDownload,
+  IconExternal,
   IconKey,
   IconRefresh,
   IconScan,
@@ -79,12 +82,44 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
   const [error, setError] = useState("");
   const cancelRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const jdFileRef = useRef<HTMLInputElement>(null);
+  const [jdSource, setJdSource] = useState("");
+
+  /** Loads the JD from a file: .pdf parsed with pdf.js, .docx with the ZIP parser, both locally. */
+  async function onJdFile(f: File | null) {
+    if (!f) return;
+    const name = f.name.toLowerCase();
+    try {
+      if (name.endsWith(".pdf")) {
+        const text = await extractPdfText(await f.arrayBuffer());
+        setJd(text);
+        setJdSource(f.name);
+        toast("success", `JD extracted from “${f.name}” (${text.length.toLocaleString()} chars). Paste-over if anything looks off.`);
+      } else if (name.endsWith(".docx")) {
+        const text = await extractDocxText(await f.arrayBuffer());
+        setJd(text);
+        setJdSource(f.name);
+        toast("success", `JD extracted from “${f.name}” (${text.length.toLocaleString()} chars).`);
+      } else if (name.endsWith(".doc")) {
+        toast("error", "Legacy .doc files can't be read in-browser. Save the JD as .docx or PDF, or paste the text.");
+      } else {
+        const text = await f.text();
+        if (!text.trim()) throw new Error("That file is empty.");
+        setJd(text);
+        setJdSource(f.name);
+        toast("success", `JD loaded from “${f.name}”.`);
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Could not read that file.");
+    }
+  }
 
   const split = useMemo(() => (cvText.trim() ? splitCvs(cvText, sep) : { blocks: [], method: "empty" }), [cvText, sep]);
   const running = phase.kind === "screen" || phase.kind === "rank";
 
   function loadDemo() {
     setJd(SAMPLE_JD);
+    setJdSource("");
     setCvText(SAMPLE_CVS);
     setSep("");
     setFileName("demo_candidates_merged.txt");
@@ -228,15 +263,38 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
         {/* -------- inputs -------- */}
         <div className="space-y-5 xl:col-span-3">
           <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-display text-[15px] font-bold tracking-tight">Job description</h3>
-              <span className="font-mono text-[11px] text-ink3">{jd.trim() ? `${(jd.length / 1000).toFixed(1)}k chars` : "required"}</span>
+              <div className="flex items-center gap-2.5">
+                <span className="font-mono text-[11px] text-ink3">
+                  {jdSource ? (
+                    <span className="text-pine-600">via {jdSource} · </span>
+                  ) : null}
+                  {jd.trim() ? `${(jd.length / 1000).toFixed(1)}k chars` : "paste or upload"}
+                </span>
+                <Btn variant="outline" size="sm" onClick={() => jdFileRef.current?.click()}>
+                  <IconUpload className="h-3.5 w-3.5" /> Upload PDF / Word
+                </Btn>
+              </div>
             </div>
+            <input
+              ref={jdFileRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt,.md,.text"
+              className="hidden"
+              onChange={(e) => {
+                onJdFile(e.target.files?.[0] ?? null);
+                e.target.value = "";
+              }}
+            />
             <textarea
               className={areaCls + " min-h-[150px] font-[13px]"}
-              placeholder={"Paste the full JD for the role…\n\ne.g. Senior Frontend Engineer — React, TypeScript, 6+ yrs…"}
+              placeholder={"Paste the full JD here, or upload it as PDF / Word…\n\ne.g. Senior Frontend Engineer — React, TypeScript, 6+ yrs…"}
               value={jd}
-              onChange={(e) => setJd(e.target.value)}
+              onChange={(e) => {
+                setJd(e.target.value);
+                setJdSource("");
+              }}
             />
             <div className="mt-4 grid grid-cols-2 gap-4">
               <Field label="Shortlist size" hint="top N candidates">
@@ -263,7 +321,15 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
           <Card className="p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-display text-[15px] font-bold tracking-tight">Merged CVs file</h3>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Btn
+                  variant="gold"
+                  size="sm"
+                  onClick={() => window.open("https://onefileapp.com", "_blank", "noopener,noreferrer")}
+                  title="Open onefileapp.com in a new tab to merge your CVs into one .txt"
+                >
+                  <IconExternal className="h-3.5 w-3.5" /> onefileapp.com
+                </Btn>
                 <Btn variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
                   <IconUpload className="h-3.5 w-3.5" /> Upload .txt
                 </Btn>

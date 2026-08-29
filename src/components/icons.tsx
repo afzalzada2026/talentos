@@ -216,3 +216,10 @@ export const IconTable = (p: P) => (
     <path d="M3.5 9.5h17M9.5 9.5v10M15.5 9.5v10" />
   </S>
 );
+
+export const IconExternal = (p: P) => (
+  <S {...p}>
+    <path d="M10 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V14" />
+    <path d="M14 4h6v6M20 4L11 13" />
+  </S>
+);

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Settings } from "../lib/types";
-import { DEFAULT_SETTINGS, PROVIDERS, getProvider, groqChat } from "../lib/groq";
+import { DEFAULT_SETTINGS, PROVIDERS, fetchModels, getProvider, groqChat } from "../lib/groq";
 import type { ProviderId } from "../lib/types";
+import { useLocalStorage } from "../lib/store";
 import { Btn, Field, Spinner, inputCls, useToast } from "./ui";
-import { IconCheck, IconEye, IconEyeOff, IconKey, IconX, IconAlert } from "./icons";
+import { IconCheck, IconEye, IconEyeOff, IconKey, IconRefresh, IconX, IconAlert } from "./icons";
 
 export default function SettingsDrawer({
   open,
@@ -21,6 +22,8 @@ export default function SettingsDrawer({
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [testMsg, setTestMsg] = useState("");
+  const [fetched, setFetched] = useLocalStorage<Record<string, { id: string; label: string }[]>>("talentos.fetchedModels", {});
+  const [fetching, setFetching] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -43,6 +46,19 @@ export default function SettingsDrawer({
     } catch (e) {
       setTesting("fail");
       setTestMsg(e instanceof Error ? e.message : "Connection failed.");
+    }
+  }
+
+  async function fetchModelList() {
+    setFetching(true);
+    try {
+      const list = await fetchModels(draft);
+      setFetched((f) => ({ ...f, [draft.provider]: list }));
+      toast("success", `Found ${list.length} usable model${list.length === 1 ? "" : "s"} on your ${getProvider(draft).name} key.`);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Could not fetch the model list.");
+    } finally {
+      setFetching(false);
     }
   }
 
@@ -158,19 +174,50 @@ export default function SettingsDrawer({
           <section className="space-y-2">
             <Field label="Model">
               <select className={inputCls + " cursor-pointer"} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>
-                {!getProvider(draft).models.some((m) => m.id === draft.model) && (
-                  <option value={draft.model}>{draft.model} — saved, not on this provider's list (may fail)</option>
+                {!getProvider(draft).models.some((m) => m.id === draft.model) &&
+                  !(fetched[draft.provider] ?? []).some((m) => m.id === draft.model) && (
+                    <option value={draft.model}>{draft.model} — saved, not on this provider's list (may fail)</option>
+                  )}
+                {(fetched[draft.provider] ?? []).length > 0 ? (
+                  <>
+                    <optgroup label={`Available on your ${getProvider(draft).name} key`}>
+                      {(fetched[draft.provider] ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Built-in recommendations">
+                      {getProvider(draft)
+                        .models.filter((m) => !(fetched[draft.provider] ?? []).some((f) => f.id === m.id))
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                    </optgroup>
+                  </>
+                ) : (
+                  getProvider(draft).models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))
                 )}
-                {getProvider(draft).models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
               </select>
             </Field>
+            <button
+              type="button"
+              onClick={fetchModelList}
+              disabled={fetching}
+              className="inline-flex items-center gap-1.5 rounded-md border border-line2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-ink2 transition-all hover:border-pine-400 hover:text-pine-700 active:translate-y-px disabled:pointer-events-none disabled:opacity-50"
+            >
+              {fetching ? <Spinner className="h-3.5 w-3.5" /> : <IconRefresh className="h-3.5 w-3.5" />}
+              Fetch models available on my key
+            </button>
             <p className="text-[12px] leading-relaxed text-ink3">
-              Hitting free-tier rate limits on huge CV files? Switch heavy screening runs to{" "}
-              <strong className="text-ink2">GPT-OSS 20B</strong> — it processes batches far faster. If a run errors with “model not found”, your key doesn't host it — pick the first option instead.
+              Unsure which model your key serves? Fetch the live list — the dropdown then shows exactly what works. Hitting free-tier rate limits on huge CV files? Switch heavy screening runs to{" "}
+              <strong className="text-ink2">GPT-OSS 20B</strong> or <strong className="text-ink2">Gemini 2.5 Flash</strong>.
             </p>
           </section>
 

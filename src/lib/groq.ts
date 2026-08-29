@@ -171,7 +171,9 @@ export async function groqChat(
           ...(isGptOss
             ? { temperature: 1, top_p: 1, reasoning_effort: opts?.reasoning ?? "low" }
             : { temperature: s.temperature }),
-          max_completion_tokens: effMax,
+          // Groq (gpt-oss) needs max_completion_tokens; Google's compat layer
+          // only accepts the legacy max_tokens field.
+          ...(s.provider === "groq" ? { max_completion_tokens: effMax } : { max_tokens: effMax }),
           ...(json && !isGptOss ? { response_format: { type: "json_object" } } : {}),
           messages: [
             {
@@ -213,10 +215,10 @@ export async function groqChat(
         }
         if ((res.status === 400 || res.status === 404) && /model/i.test(msg)) {
           throw new Error(
-            `${msg} — this model isn't on your key. Open Settings and choose GPT-OSS 120B (the default free-tier chat model).`
+            `${msg} — this model isn't available on your key. In Settings, use “Fetch available models” to list the models your key can actually use.`
           );
         }
-        throw new Error(msg);
+        throw new Error(`[${res.status}] ${msg}`);
       }
 
       const data = await res.json();
@@ -274,4 +276,44 @@ export function extractJson(raw: string): any {
     }
   }
   throw new Error("The model didn't return valid JSON. Try again, or switch to a stronger model in Settings.");
+}
+
+/**
+ * Asks the provider's OpenAI-compatible /models endpoint which chat models
+ * this key can actually use — removes all guesswork about model IDs.
+ */
+export async function fetchModels(s: Settings): Promise<{ id: string; label: string }[]> {
+  const provider = getProvider(s);
+  if (!s.apiKey.trim()) throw new Error("Enter your API key first.");
+  const res = await fetch(`${provider.baseUrl}/models`, {
+    headers: { Authorization: `Bearer ${s.apiKey.trim()}` },
+  });
+  if (!res.ok) {
+    let msg = `Provider error ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j?.error?.message ?? msg;
+    } catch {
+      /* non-JSON body */
+    }
+    throw new Error(`[${res.status}] ${msg}`);
+  }
+  const data = await res.json();
+  const ids: string[] = Array.isArray(data?.data)
+    ? data.data.map((m: any) => String(m?.id ?? "")).filter(Boolean)
+    : [];
+  const drop = /embed|tts|whisper|speech|dall|sora|imagen/i;
+  let kept = Array.from(new Set(ids.filter((id) => !drop.test(id))));
+  if (s.provider === "gemini") kept = kept.filter((id) => /gemini/i.test(id));
+  kept.sort((a, b) => a.localeCompare(b));
+  if (s.provider === "openrouter") {
+    // Surface the ":free" lineup first — that's what the free tier serves.
+    kept.sort((a, b) => Number(/:free$/.test(b)) - Number(/:free$/.test(a)));
+  }
+  const out = kept.slice(0, 60).map((id) => ({
+    id,
+    label: id + (s.provider === "openrouter" && /:free$/.test(id) ? " · free" : ""),
+  }));
+  if (!out.length) throw new Error("The provider returned no usable chat models for this key.");
+  return out;
 }

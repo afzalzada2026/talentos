@@ -143,7 +143,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
           settings,
           SCREEN_SYS,
           `JOB DESCRIPTION:\n"""\n${jd}\n"""\n\nScreen every CV below and return one summary object per CV.\n\n${batchText}`,
-          { json: true, maxTokens: 6000 }
+          { json: true, maxTokens: 8192, reasoning: "low" }
         );
         const j = extractJson(raw);
         const list: any[] = Array.isArray(j) ? j : j?.candidates ?? j?.shortlist ?? [];
@@ -162,7 +162,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
           settings,
           RANK_SYS,
           `Shortlist size N = ${topN}\n\nJOB DESCRIPTION:\n"""\n${jd}\n"""\n\nCANDIDATE SUMMARIES (JSON):\n${JSON.stringify(pool)}`,
-          { json: true, maxTokens: 6000 }
+          { json: true, maxTokens: 8192, reasoning: "low" }
         );
         const j = extractJson(raw);
         const list: any[] = Array.isArray(j) ? j : j?.shortlist ?? j?.candidates ?? [];

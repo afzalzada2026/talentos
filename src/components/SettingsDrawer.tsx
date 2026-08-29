@@ -34,8 +34,8 @@ export default function SettingsDrawer({
     setTestMsg("");
     try {
       await groqChat(draft, "You are a connectivity probe.", "Reply with the single word: ready", {
-        maxTokens: 12,
-        retries: 0,
+        maxTokens: 128,
+        retries: 1,
       });
       setTesting("ok");
       setTestMsg("Connection OK — the model responded.");

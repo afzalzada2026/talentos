@@ -70,7 +70,7 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
         settings,
         JD_SYS,
         `SAMPLE COMPANY JD FORMAT:\n"""\n${template}\n"""\n\nNEW POSITION DETAILS:\nPosition Title: ${title.trim()}\nDivision / Department: ${division.trim()}\nJob Level: ${effLevel}\nAdditional instructions: ${extra.trim() || "None"}\n\nGenerate the job description now, in Markdown.`,
-        { maxTokens: 4200 }
+        { maxTokens: 8192, reasoning: "medium" }
       );
       setResult({ md: md.trim(), title: title.trim(), division: division.trim(), level: effLevel, at: new Date().toISOString() });
       toast("success", "JD generated in your company format.");

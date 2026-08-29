@@ -20,6 +20,7 @@ interface ChatOpts {
   json?: boolean;
   maxTokens?: number;
   retries?: number;
+  reasoning?: "low" | "medium" | "high";
 }
 
 /**
@@ -50,7 +51,11 @@ export async function groqChat(
         body: JSON.stringify({
           model: s.model,
           temperature: s.temperature,
-          max_tokens: maxTokens,
+          // gpt-oss are reasoning models: the canonical budget field is
+          // max_completion_tokens, and unbounded "thinking" can eat the whole
+          // budget — so reasoning effort is capped (default low).
+          max_completion_tokens: maxTokens,
+          ...(s.model.includes("gpt-oss") ? { reasoning_effort: opts?.reasoning ?? "low" } : {}),
           ...(json ? { response_format: { type: "json_object" } } : {}),
           messages: [
             { role: "system", content: system },
@@ -81,8 +86,18 @@ export async function groqChat(
 
       const data = await res.json();
       const content = data?.choices?.[0]?.message?.content;
+      const finish = data?.choices?.[0]?.finish_reason;
       if (typeof content !== "string" || !content.trim()) {
-        throw new Error("Groq returned an empty response. Try again.");
+        if (attempt < retries) {
+          lastErr = new Error("empty");
+          await sleep(3000);
+          continue;
+        }
+        throw new Error(
+          finish === "length"
+            ? "The model ran out of tokens before finishing its reply. Lower the shortlist size or batch count, or switch to GPT-OSS 20B in Settings."
+            : "Groq returned an empty response (the model spent its token budget on internal reasoning). Try again, or switch to GPT-OSS 20B in Settings."
+        );
       }
       return content;
     } catch (e) {

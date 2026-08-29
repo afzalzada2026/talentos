@@ -2,8 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import type { SeedOnboarded, SeedReq } from "../lib/demo";
 import { seedOnboarded, seedReqs } from "../lib/demo";
 import { useLocalStorage } from "../lib/store";
-import { exportCSV, parseCSV } from "../lib/download";
-import { AnimatedNumber, Btn, Card, EmptyState, Field, Modal, inputCls, useToast, STATUSES, STATUS_META, ONBOARDED_HEX } from "../components/ui";
+import { parseCSV, smartDownload, toCsv } from "../lib/download";
+import { AnimatedNumber, Btn, Card, EmptyState, Field, FileGrabModal, Modal, inputCls, useToast, STATUSES, STATUS_META, ONBOARDED_HEX } from "../components/ui";
 import type { RecStatus } from "../components/ui";
 import {
   IconCalendar,
@@ -43,6 +43,7 @@ export default function Tracker() {
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const [grab, setGrab] = useState<{ filename: string; content: string; mime: string } | null>(null);
 
   // onboarding modal fields
   const [obJoiner, setObJoiner] = useState("");
@@ -184,18 +185,27 @@ export default function Tracker() {
   }
 
   function exportSheet() {
-    if (sheet === "pipeline") {
-      exportCSV("recruitment_pipeline.csv", [
-        ["Ref", "Position", "Division", "Level", "Vacancies", "Hiring Manager", "Recruiter", "Opened", "Target Fill", "Source", "Applicants", "Shortlisted", "Status", "Notes"],
-        ...rows.map((r) => [r.ref, r.position, r.division, r.level, r.vacancies, r.manager, r.recruiter, r.opened, r.target, r.source, r.applicants, r.shortlisted, r.status, r.notes]),
-      ]);
+    const isPipe = sheet === "pipeline";
+    const filename = isPipe ? "recruitment_pipeline.csv" : "onboarded_positions.csv";
+    const csv =
+      "\ufeff" +
+      toCsv(
+        isPipe
+          ? [
+              ["Ref", "Position", "Division", "Level", "Vacancies", "Hiring Manager", "Recruiter", "Opened", "Target Fill", "Source", "Applicants", "Shortlisted", "Status", "Notes"],
+              ...rows.map((r) => [r.ref, r.position, r.division, r.level, r.vacancies, r.manager, r.recruiter, r.opened, r.target, r.source, r.applicants, r.shortlisted, r.status, r.notes]),
+            ]
+          : [
+              ["Ref", "Position", "Division", "Level", "Joiner", "Joined On", "Days to Fill", "Recruiter", "Source", "Salary Band", "Notes"],
+              ...done.map((r) => [r.ref, r.position, r.division, r.level, r.joiner, r.joined, r.daysToFill, r.recruiter, r.source, r.salary, r.notes]),
+            ]
+      );
+    if (smartDownload(filename, csv, "text/csv")) {
+      toast("success", "CSV exported — opens in Excel.");
     } else {
-      exportCSV("onboarded_positions.csv", [
-        ["Ref", "Position", "Division", "Level", "Joiner", "Joined On", "Days to Fill", "Recruiter", "Source", "Salary Band", "Notes"],
-        ...done.map((r) => [r.ref, r.position, r.division, r.level, r.joiner, r.joined, r.daysToFill, r.recruiter, r.source, r.salary, r.notes]),
-      ]);
+      setGrab({ filename, content: csv, mime: "text/csv" });
+      toast("info", "Direct save is blocked in this preview — use the dialog to grab the file.");
     }
-    toast("success", "CSV exported.");
   }
 
   function importCSV(file: File | null) {
@@ -613,6 +623,14 @@ export default function Tracker() {
           </div>
         </div>
       </Modal>
+
+      <FileGrabModal
+        open={!!grab}
+        onClose={() => setGrab(null)}
+        filename={grab?.filename ?? ""}
+        content={grab?.content ?? ""}
+        mime={grab?.mime ?? "text/plain"}
+      />
     </div>
   );
 }

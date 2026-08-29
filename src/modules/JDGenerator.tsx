@@ -2,11 +2,11 @@ import { useRef, useState } from "react";
 import type { JDLibItem, Settings } from "../lib/types";
 import { LEVELS } from "../lib/types";
 import { groqChat } from "../lib/groq";
-import { copyRichText, copyText, inFrame, mdToHtml, printPdf, saveAsDoc, saveText, slug } from "../lib/download";
+import { copyRichText, copyText, docFileContent, inFrame, mdToHtml, printPdf, smartDownload, slug } from "../lib/download";
 import { extractDocxText } from "../lib/docx";
 import { DEFAULT_JD_TEMPLATE } from "../lib/demo";
 import { useLocalStorage } from "../lib/store";
-import { Btn, Card, Field, Modal, Spinner, areaCls, inputCls, useToast } from "../components/ui";
+import { Btn, Card, Field, FileGrabModal, Modal, Spinner, areaCls, inputCls, useToast } from "../components/ui";
 import {
   IconChevron,
   IconCopy,
@@ -46,7 +46,7 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
   const [library, setLibrary] = useLocalStorage<JDLibItem[]>("talentos.jdLibrary", []);
   const [viewOpen, setViewOpen] = useState(false);
   const tplFileRef = useRef<HTMLInputElement>(null);
-  const frameWarned = useRef(false);
+  const [grabState, setGrabState] = useState<{ filename: string; content: string; mime: string; richHtml?: string } | null>(null);
 
   const effLevel = level === "Custom…" ? customLevel.trim() || "—" : level;
 
@@ -74,20 +74,36 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
     }
   }
 
-  /** Wraps every download with feedback; warns once if a preview frame may block saves. */
-  function dl(fn: () => void, label: string) {
-    try {
-      fn();
+  /** Downloads a text file — with an in-app grab dialog when a sandboxed preview blocks saves. */
+  function grab(filename: string, content: string, mime: string, label: string, richHtml?: string) {
+    if (smartDownload(filename, content, mime)) {
       toast("success", label);
-      if (inFrame() && !frameWarned.current) {
-        frameWarned.current = true;
-        setTimeout(
-          () => toast("info", "You're inside a preview frame — if the file didn't save, use Open → “Copy for Word” instead."),
-          500
-        );
-      }
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Download failed.");
+    } else {
+      setGrabState({ filename, content, mime, richHtml });
+      toast("info", "Direct save is blocked in this preview — use the dialog to grab the file.");
+    }
+  }
+
+  function exportWord() {
+    if (!result) return;
+    grab(`${fileBase()}.doc`, "\ufeff" + docFileContent(result.md, result.title), "application/msword", "Word (.doc) downloaded.", mdToHtml(result.md));
+  }
+  function exportMd() {
+    if (!result) return;
+    grab(`${fileBase()}.md`, result.md, "text/markdown", "Markdown downloaded.");
+  }
+  function exportTxt() {
+    if (!result) return;
+    grab(`${fileBase()}.txt`, result.md, "text/plain", "Plain text downloaded.");
+  }
+  function exportPdf() {
+    if (!result) return;
+    if (inFrame()) {
+      setViewOpen(true);
+      toast("info", "Printing is blocked in this preview — use “Copy for Word” in the viewer, then Save As PDF from Word.");
+    } else {
+      printPdf(result.md, result.title);
+      toast("success", "Print dialog opened — choose “Save as PDF” as the destination.");
     }
   }
 
@@ -310,16 +326,16 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
                 <Btn variant="primary" size="sm" onClick={() => setViewOpen(true)}>
                   <IconEye className="h-3.5 w-3.5" /> Open
                 </Btn>
-                <Btn variant="gold" size="sm" onClick={() => dl(() => saveAsDoc(result.md, `${fileBase()}.doc`, result.title), "Word (.doc) downloaded.")}>
+                <Btn variant="gold" size="sm" onClick={exportWord}>
                   <IconDownload className="h-3.5 w-3.5" /> Word
                 </Btn>
-                <Btn variant="outline" size="sm" onClick={() => printPdf(result.md, result.title)}>
+                <Btn variant="outline" size="sm" onClick={exportPdf}>
                   <IconPrint className="h-3.5 w-3.5" /> PDF
                 </Btn>
-                <Btn variant="outline" size="sm" onClick={() => dl(() => saveText(result.md, `${fileBase()}.md`, "text/markdown"), "Markdown downloaded.")}>
+                <Btn variant="outline" size="sm" onClick={exportMd}>
                   .md
                 </Btn>
-                <Btn variant="outline" size="sm" onClick={() => dl(() => saveText(result.md, `${fileBase()}.txt`, "text/plain"), "Plain text downloaded.")}>
+                <Btn variant="outline" size="sm" onClick={exportTxt}>
                   .txt
                 </Btn>
                 <Btn variant="outline" size="sm" onClick={async () => ((await copyText(result.md)) ? toast("success", "Markdown copied.") : toast("error", "Copy failed."))}>
@@ -374,10 +390,10 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
               <Btn variant="outline" size="sm" onClick={async () => ((await copyText(result.md)) ? toast("success", "Markdown copied.") : toast("error", "Copy failed."))}>
                 Copy Markdown
               </Btn>
-              <Btn variant="outline" size="sm" onClick={() => dl(() => saveAsDoc(result.md, `${fileBase()}.doc`, result.title), "Word (.doc) downloaded.")}>
+              <Btn variant="outline" size="sm" onClick={exportWord}>
                 <IconDownload className="h-3.5 w-3.5" /> Word (.doc)
               </Btn>
-              <Btn variant="outline" size="sm" onClick={() => printPdf(result.md, result.title)}>
+              <Btn variant="outline" size="sm" onClick={exportPdf}>
                 <IconPrint className="h-3.5 w-3.5" /> Print / PDF
               </Btn>
             </div>
@@ -390,6 +406,15 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
           </div>
         )}
       </Modal>
+
+      <FileGrabModal
+        open={!!grabState}
+        onClose={() => setGrabState(null)}
+        filename={grabState?.filename ?? ""}
+        content={grabState?.content ?? ""}
+        mime={grabState?.mime ?? "text/plain"}
+        richHtml={grabState?.richHtml}
+      />
     </div>
   );
 }

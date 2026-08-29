@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { IconAlert, IconCheck, IconInfo, IconX } from "./icons";
+import { IconAlert, IconCheck, IconCopy, IconDownload, IconInfo, IconX } from "./icons";
+import { copyRichText, copyText, makeBlobUrl } from "../lib/download";
 
 /* ---------------- toasts ---------------- */
 
@@ -156,6 +157,101 @@ export function Modal({
         <div className="p-5">{children}</div>
       </div>
     </div>
+  );
+}
+
+/* ---------------- grab-your-file fallback ---------------- */
+
+/**
+ * Shown when the browser (usually a preview iframe) blocks a direct download.
+ * Offers a direct download link (user-initiated), copy-to-clipboard, and an
+ * optional rich-text "Copy for Word".
+ */
+export function FileGrabModal({
+  open,
+  onClose,
+  filename,
+  content,
+  mime,
+  richHtml,
+}: {
+  open: boolean;
+  onClose: () => void;
+  filename: string;
+  content: string;
+  mime: string;
+  richHtml?: string;
+}) {
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const url = useMemo(() => (open ? makeBlobUrl(content, mime) : ""), [open, content, mime]);
+  useEffect(() => {
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [url]);
+  useEffect(() => {
+    if (open) setCopied(false);
+  }, [open]);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Save your file" width="max-w-2xl">
+      <div className="space-y-4">
+        <div className="flex items-start gap-2.5 rounded-lg border border-gold-400/50 bg-gold-100/60 px-3.5 py-3 text-[12.5px] leading-relaxed text-ink2">
+          <IconInfo className="mt-0.5 h-4 w-4 shrink-0 text-gold-600" />
+          <p>
+            This preview environment blocks automatic file saves, so pick one of these instead. When you open the
+            published site in a normal browser tab, downloads will just work.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-md bg-pine-900 px-2.5 py-1 font-mono text-[11.5px] font-semibold text-pine-100">{filename}</span>
+          <span className="font-mono text-[11px] text-ink3">{(content.length / 1024).toFixed(1)} KB</span>
+          <div className="ml-auto flex gap-2">
+            {richHtml && (
+              <Btn
+                variant="gold"
+                size="sm"
+                onClick={async () => {
+                  (await copyRichText(richHtml, content))
+                    ? toast("success", "Copied with formatting — paste into Word (Ctrl+V).")
+                    : toast("error", "Clipboard blocked here — use the download link.");
+                }}
+              >
+                <IconCopy className="h-3.5 w-3.5" /> Copy for Word
+              </Btn>
+            )}
+            <Btn
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                (await copyText(content)) ? (setCopied(true), toast("success", "Content copied to clipboard.")) : toast("error", "Clipboard is blocked in this context.");
+              }}
+            >
+              {copied ? <IconCheck className="h-3.5 w-3.5 text-onboarded" /> : <IconCopy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy content"}
+            </Btn>
+          </div>
+        </div>
+
+        {url && (
+          <a
+            href={url}
+            download={filename}
+            className="flex items-center justify-center gap-2 rounded-lg border border-pine-500/40 bg-pine-50 px-4 py-2.5 text-[13px] font-semibold text-pine-700 transition-colors hover:bg-pine-100"
+          >
+            <IconDownload className="h-4 w-4" />
+            Download {filename} directly
+            <span className="font-mono text-[10.5px] font-medium text-ink3">(or right-click → “Save link as…”)</span>
+          </a>
+        )}
+
+        <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-white p-4 font-mono text-[11.5px] leading-relaxed text-ink2">
+          {content}
+        </pre>
+      </div>
+    </Modal>
   );
 }
 

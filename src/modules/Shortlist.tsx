@@ -2,11 +2,11 @@ import { useMemo, useRef, useState } from "react";
 import type { CandidateSummary, CvBlock, Settings } from "../lib/types";
 import { extractJson, groqChat } from "../lib/groq";
 import { splitCvs } from "../lib/cv";
-import { copyText, exportCSV } from "../lib/download";
+import { copyText, smartDownload, toCsv } from "../lib/download";
 import { extractDocxText } from "../lib/docx";
 import { extractPdfText } from "../lib/pdf";
 import { SAMPLE_CVS, SAMPLE_JD } from "../lib/demo";
-import { Bar, Btn, Card, Field, Spinner, areaCls, inputCls, useToast } from "../components/ui";
+import { Bar, Btn, Card, Field, FileGrabModal, Spinner, areaCls, inputCls, useToast } from "../components/ui";
 import {
   IconAlert,
   IconArrow,
@@ -84,6 +84,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
   const fileRef = useRef<HTMLInputElement>(null);
   const jdFileRef = useRef<HTMLInputElement>(null);
   const [jdSource, setJdSource] = useState("");
+  const [grab, setGrab] = useState<{ filename: string; content: string; mime: string } | null>(null);
 
   /** Loads the JD from a file: .pdf parsed with pdf.js, .docx with the ZIP parser, both locally. */
   async function onJdFile(f: File | null) {
@@ -224,11 +225,16 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
 
   function exportCsv() {
     if (!results) return;
-    exportCSV("shortlist_top_candidates.csv", [
+    const csv = "\ufeff" + toCsv([
       ["Rank", "CV Name", "Candidate Name", "Current/Last Job Title", "Current/Last Organization", "Relevant Experience", "Qualifications", "Email Address", "Phone Number", "Why should be considered?"],
       ...results.map((c, i) => [i + 1, c.cvName, c.candidateName, c.currentTitle, c.currentOrg, c.relevantExp, c.qualifications, c.email, c.phone, c.why]),
     ]);
-    toast("success", "CSV exported — opens in Excel.");
+    if (smartDownload("shortlist_top_candidates.csv", csv, "text/csv")) {
+      toast("success", "CSV exported — opens in Excel.");
+    } else {
+      setGrab({ filename: "shortlist_top_candidates.csv", content: csv, mime: "text/csv" });
+      toast("info", "Direct save is blocked in this preview — use the dialog to grab the file.");
+    }
   }
 
   async function copyMd() {
@@ -576,6 +582,14 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
           </p>
         </Card>
       )}
+
+      <FileGrabModal
+        open={!!grab}
+        onClose={() => setGrab(null)}
+        filename={grab?.filename ?? ""}
+        content={grab?.content ?? ""}
+        mime={grab?.mime ?? "text/plain"}
+      />
     </div>
   );
 }

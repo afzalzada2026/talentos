@@ -149,6 +149,21 @@ export function downloadBlob(filename: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+export function makeBlobUrl(content: string, mime: string): string {
+  return URL.createObjectURL(new Blob([content], { type: mime + ";charset=utf-8" }));
+}
+
+/**
+ * Downloads a text file — returns true when delivered directly.
+ * Returns false inside an iframe (preview sandboxes silently block
+ * programmatic saves), so the caller can show the grab-your-file fallback.
+ */
+export function smartDownload(filename: string, content: string, mime: string): boolean {
+  if (inFrame()) return false;
+  downloadBlob(filename, new Blob([content], { type: mime + ";charset=utf-8" }));
+  return true;
+}
+
 /** Copies formatted HTML + plain text to the clipboard — pastes straight into MS Word. */
 export async function copyRichText(html: string, plain: string): Promise<boolean> {
   try {
@@ -170,11 +185,15 @@ h3{font-size:11.5pt;margin:10pt 0 4pt}p{margin:5pt 0}ul,ol{margin:5pt 0 5pt 20pt
 table{border-collapse:collapse;width:100%}th,td{border:1pt solid #999;padding:4pt 6pt;font-size:10.5pt}
 hr{border:none;border-top:1pt solid #bbb;margin:12pt 0}blockquote{border-left:3pt solid #c98a2d;margin:8pt 0;padding:2pt 10pt;color:#444}`;
 
-export function saveAsDoc(md: string, filename: string, title: string) {
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(
+/** Full MS-Word-compatible HTML document for a Markdown source. */
+export function docFileContent(md: string, title: string): string {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(
     title
   )}</title><style>${DOC_STYLES}</style></head><body>${mdToHtml(md)}</body></html>`;
-  downloadBlob(filename, new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" }));
+}
+
+export function saveAsDoc(md: string, filename: string, title: string) {
+  downloadBlob(filename, new Blob(["\ufeff", docFileContent(md, title)], { type: "application/msword;charset=utf-8" }));
 }
 
 export function saveText(md: string, filename: string, mime: string) {
@@ -207,13 +226,17 @@ export function printPdf(md: string, title: string) {
   }, 80);
 }
 
-export function exportCSV(filename: string, rows: (string | number)[][]) {
+/** Serialises rows to a CSV string (Excel-safe: BOM handled by callers, quoting included). */
+export function toCsv(rows: (string | number)[][]): string {
   const q = (v: string | number) => {
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const csv = rows.map((r) => r.map(q).join(",")).join("\r\n");
-  downloadBlob(filename, new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+  return rows.map((r) => r.map(q).join(",")).join("\r\n");
+}
+
+export function exportCSV(filename: string, rows: (string | number)[][]) {
+  downloadBlob(filename, new Blob(["\ufeff" + toCsv(rows)], { type: "text/csv;charset=utf-8" }));
 }
 
 export function parseCSV(text: string): string[][] {

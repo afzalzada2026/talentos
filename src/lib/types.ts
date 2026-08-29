@@ -1,4 +1,7 @@
+export type ProviderId = "groq" | "gemini" | "openrouter" | "cerebras";
+
 export interface Settings {
+  provider: ProviderId;
   apiKey: string;
   model: string;
   temperature: number;

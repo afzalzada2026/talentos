@@ -1,18 +1,79 @@
-import type { Settings } from "./types";
+import type { ProviderId, Settings } from "./types";
 
-/** Models currently served on Groq's free tier. GPT-OSS is the best chat model most free keys get. */
-export const GROQ_MODELS = [
-  { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B — best chat model on free keys (recommended)" },
-  { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B — faster, lighter on free-tier rate limits" },
-  { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B — if available on your key" },
-  { id: "moonshotai/kimi-k2-instruct-0905", label: "Kimi K2 Instruct — if available on your key" },
-] as const;
+export interface ProviderInfo {
+  id: ProviderId;
+  name: string;
+  baseUrl: string; // OpenAI-compatible root (no trailing slash)
+  keyUrl: string;
+  blurb: string;
+  models: { id: string; label: string }[];
+}
+
+/** Free OpenAI-compatible providers. All four support /chat/completions with a Bearer key. */
+export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
+  groq: {
+    id: "groq",
+    name: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    keyUrl: "https://console.groq.com/keys",
+    blurb: "Fastest inference on free keys. Best chat models today: GPT-OSS 120B/20B, plus Kimi K2 and Llama 4 Scout when available.",
+    models: [
+      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B — best chat model on free keys (recommended)" },
+      { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B — faster, lighter on free-tier rate limits" },
+      { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B — if available on your key" },
+      { id: "moonshotai/kimi-k2-instruct-0905", label: "Kimi K2 Instruct — if available on your key" },
+    ],
+  },
+  gemini: {
+    id: "gemini",
+    name: "Google Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    keyUrl: "https://aistudio.google.com/apikey",
+    blurb: "Best free quota + a 1M-token context window — huge CV batches fit in far fewer calls. OpenAI-compatible endpoint, JSON mode supported.",
+    models: [
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash — smart, generous free tier (recommended)" },
+      { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite — fastest, lightest on quota" },
+      { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash — older, wide availability" },
+    ],
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    keyUrl: "https://openrouter.ai/keys",
+    blurb: "One key, many free models (look for the :free tag — the lineup rotates, verify at openrouter.ai/models).",
+    models: [
+      { id: "meta-llama/llama-4-maverick:free", label: "Llama 4 Maverick (free) — strong all-rounder" },
+      { id: "meta-llama/llama-4-scout:free", label: "Llama 4 Scout (free) — lighter" },
+      { id: "mistralai/mistral-small-3.2-24b-instruct:free", label: "Mistral Small 3.2 24B (free)" },
+      { id: "google/gemma-3-27b-it:free", label: "Gemma 3 27B (free) — good fallback" },
+    ],
+  },
+  cerebras: {
+    id: "cerebras",
+    name: "Cerebras",
+    baseUrl: "https://api.cerebras.ai/v1",
+    keyUrl: "https://cloud.cerebras.ai",
+    blurb: "Groq-class speed on Llama models with a simple free tier — a great second engine if Groq throttles you.",
+    models: [
+      { id: "llama-3.3-70b", label: "Llama 3.3 70B — best quality (recommended)" },
+      { id: "qwen-3-32b", label: "Qwen 3 32B — balanced" },
+      { id: "llama-3.1-8b", label: "Llama 3.1 8B — fastest" },
+    ],
+  },
+};
 
 export const DEFAULT_SETTINGS: Settings = {
+  provider: "groq",
   apiKey: "",
   model: "openai/gpt-oss-120b",
   temperature: 0.2,
 };
+
+/** Safe lookup that tolerates old saved settings without a provider field. */
+export function getProvider(s: Settings): ProviderInfo {
+  return PROVIDERS[s.provider] ?? PROVIDERS.groq;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,8 +95,9 @@ export async function groqChat(
   opts?: ChatOpts
 ): Promise<string> {
   const { json = false, maxTokens = 6000, retries = 2 } = opts ?? {};
+  const provider = getProvider(s);
   if (!s.apiKey.trim()) {
-    throw new Error("Add your free Groq API key in Settings first (console.groq.com → API Keys).");
+    throw new Error(`Add your free ${provider.name} API key in Settings first (${provider.keyUrl}).`);
   }
 
   const isGptOss = s.model.includes("gpt-oss");
@@ -43,7 +105,7 @@ export async function groqChat(
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(attempt === 1 ? 9000 : 22000);
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      const res = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

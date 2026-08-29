@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Settings } from "../lib/types";
-import { DEFAULT_SETTINGS, GROQ_MODELS, groqChat } from "../lib/groq";
+import { DEFAULT_SETTINGS, PROVIDERS, getProvider, groqChat } from "../lib/groq";
+import type { ProviderId } from "../lib/types";
 import { Btn, Field, Spinner, inputCls, useToast } from "./ui";
 import { IconCheck, IconEye, IconEyeOff, IconKey, IconX, IconAlert } from "./icons";
 
@@ -71,7 +72,40 @@ export default function SettingsDrawer({
 
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
           <section className="space-y-2">
-            <Field label="Groq API key" hint="free · stored only in this browser">
+            <Field label="AI provider" hint="all free tiers">
+              <div className="grid grid-cols-2 gap-1.5">
+                {(Object.keys(PROVIDERS) as ProviderId[]).map((pid) => {
+                  const p = PROVIDERS[pid];
+                  const active = draft.provider === pid;
+                  return (
+                    <button
+                      key={pid}
+                      type="button"
+                      onClick={() =>
+                        setDraft({ ...draft, provider: pid, model: p.models[0].id })
+                      }
+                      className={`rounded-lg border px-3 py-2 text-left transition-all ${
+                        active
+                          ? "border-pine-500 bg-pine-50 ring-2 ring-pine-500/15"
+                          : "border-line2 bg-white hover:border-pine-400"
+                      }`}
+                    >
+                      <span className={`block text-[12.5px] font-bold ${active ? "text-pine-700" : "text-ink"}`}>{p.name}</span>
+                      <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink3">
+                        {pid === "groq" ? "current default" : pid === "gemini" ? "1M context" : pid === "openrouter" ? "many models" : "groq-speed"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            <p className="text-[12px] leading-relaxed text-ink3">{getProvider(draft).blurb}</p>
+          </section>
+
+          <hr className="border-line" />
+
+          <section className="space-y-2">
+            <Field label={`${getProvider(draft).name} API key`} hint="free · stored only in this browser">
               <div className="relative">
                 <IconKey className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink3" />
                 <input
@@ -96,14 +130,14 @@ export default function SettingsDrawer({
             <p className="text-[12px] leading-relaxed text-ink3">
               Create a free key at{" "}
               <a
-                href="https://console.groq.com/keys"
+                href={getProvider(draft).keyUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="font-semibold text-pine-600 underline decoration-pine-200 underline-offset-2 hover:text-pine-700"
               >
-                console.groq.com/keys
+                {getProvider(draft).keyUrl.replace("https://", "")}
               </a>
-              . No budget needed — Groq hosts these open models on a free tier.
+              . No budget needed — every provider here runs a free tier.
             </p>
             <div className="flex items-center gap-2 pt-1">
               <Btn variant="outline" size="sm" onClick={test} disabled={testing === "busy"}>
@@ -124,10 +158,10 @@ export default function SettingsDrawer({
           <section className="space-y-2">
             <Field label="Model">
               <select className={inputCls + " cursor-pointer"} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>
-                {!GROQ_MODELS.some((m) => m.id === draft.model) && (
-                  <option value={draft.model}>{draft.model} — saved, not on the free-tier list (may fail)</option>
+                {!getProvider(draft).models.some((m) => m.id === draft.model) && (
+                  <option value={draft.model}>{draft.model} — saved, not on this provider's list (may fail)</option>
                 )}
-                {GROQ_MODELS.map((m) => (
+                {getProvider(draft).models.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
                   </option>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Settings } from "./lib/types";
-import { DEFAULT_SETTINGS } from "./lib/groq";
+import { DEFAULT_SETTINGS, getProvider } from "./lib/groq";
 import { useLocalStorage } from "./lib/store";
 import { ToastProvider, useToast } from "./components/ui";
 import SettingsDrawer from "./components/SettingsDrawer";
@@ -58,6 +58,7 @@ function Shell() {
 
   const meta = MODULES.find((m) => m.id === active) ?? MODULES[0];
   const hasKey = !!settings.apiKey.trim();
+  const providerName = getProvider(settings).name;
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -122,7 +123,7 @@ function Shell() {
               <span className="block font-display text-[13.5px] font-semibold">Settings</span>
               <span className="flex items-center gap-1.5 text-[11px]">
                 <span className={`pulse-dot h-1.5 w-1.5 rounded-full ${hasKey ? "bg-onboarded" : "bg-gold-400"}`} />
-                {hasKey ? "Groq connected" : "No API key yet"}
+                {hasKey ? `${providerName} connected` : "No API key yet"}
               </span>
             </span>
           </button>
@@ -151,7 +152,7 @@ function Shell() {
                 }`}
               >
                 <span className={`pulse-dot h-1.5 w-1.5 rounded-full ${hasKey ? "bg-onboarded" : "bg-gold-500"}`} />
-                {hasKey ? "Groq · Llama ready" : "Add free API key"}
+                {hasKey ? `${providerName} · ready` : "Add free API key"}
               </button>
               <button
                 onClick={() => setSettingsOpen(true)}
@@ -203,7 +204,7 @@ function Shell() {
         settings={settings}
         onSave={(s) => {
           setSettings(s);
-          if (s.apiKey.trim()) toast("success", "Groq engine configured.");
+          if (s.apiKey.trim()) toast("success", `${getProvider(s).name} engine configured.`);
         }}
       />
     </div>

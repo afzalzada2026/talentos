@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { CandidateSummary, CvBlock, Settings } from "../lib/types";
-import { extractJson, groqChat } from "../lib/groq";
+import { extractJson, getProvider, groqChat } from "../lib/groq";
 import { splitCvs } from "../lib/cv";
 import { copyText, smartDownload, toCsv } from "../lib/download";
 import { extractDocxText } from "../lib/docx";
@@ -255,8 +255,8 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
           <div className="flex items-start gap-3">
             <IconKey className="mt-0.5 h-5 w-5 shrink-0 text-gold-600" />
             <div>
-              <p className="text-[13.5px] font-semibold text-ink">Connect your free Groq (Llama) API key</p>
-              <p className="text-[12.5px] text-ink2">Create one at console.groq.com/keys — it's free and stays in this browser.</p>
+              <p className="text-[13.5px] font-semibold text-ink">Connect a free AI API key</p>
+              <p className="text-[12.5px] text-ink2">Groq, Google Gemini, OpenRouter or Cerebras — all free tiers, key stays in this browser.</p>
             </div>
           </div>
           <Btn variant="gold" size="sm" onClick={onOpenSettings} className="shrink-0">
@@ -400,7 +400,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
                   <h3 className="font-display text-[15px] font-bold tracking-tight text-white">Screening pipeline</h3>
                 </div>
                 <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-pine-200">
-                  {settings.model.split("/").pop()?.slice(0, 18) ?? "groq"}
+                  {getProvider(settings).name} · {settings.model.split("/").pop()?.replace(":free", "").slice(0, 16)}
                 </span>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2">

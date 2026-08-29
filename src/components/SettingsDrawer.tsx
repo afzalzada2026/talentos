@@ -152,7 +152,9 @@ export default function SettingsDrawer({
                 className="w-full accent-pine-600"
               />
             </Field>
-            <p className="text-[12px] text-ink3">Lower = stricter, more consistent screening. Keep it under 0.3 for HR work.</p>
+            <p className="text-[12px] text-ink3">
+              Lower = stricter, more consistent screening. Note: Groq pins GPT-OSS models to temperature 1 — this slider applies to other models, and the app handles the GPT-OSS constraint automatically.
+            </p>
           </section>
 
           <hr className="border-line" />

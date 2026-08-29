@@ -38,6 +38,7 @@ export async function groqChat(
     throw new Error("Add your free Groq API key in Settings first (console.groq.com → API Keys).");
   }
 
+  const isGptOss = s.model.includes("gpt-oss");
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(attempt === 1 ? 9000 : 22000);
@@ -50,15 +51,25 @@ export async function groqChat(
         },
         body: JSON.stringify({
           model: s.model,
-          temperature: s.temperature,
-          // gpt-oss are reasoning models: the canonical budget field is
-          // max_completion_tokens, and unbounded "thinking" can eat the whole
-          // budget — so reasoning effort is capped (default low).
+          // Groq serves gpt-oss with two hard constraints: sampling is pinned
+          // to temperature=1 / top_p=1, and its structured-output
+          // (response_format) path returns empty content — so JSON is
+          // requested via the prompt instead, and reasoning effort is capped
+          // so internal "thinking" can't eat the completion budget.
+          ...(isGptOss
+            ? { temperature: 1, top_p: 1, reasoning_effort: opts?.reasoning ?? "low" }
+            : { temperature: s.temperature }),
           max_completion_tokens: maxTokens,
-          ...(s.model.includes("gpt-oss") ? { reasoning_effort: opts?.reasoning ?? "low" } : {}),
-          ...(json ? { response_format: { type: "json_object" } } : {}),
+          ...(json && !isGptOss ? { response_format: { type: "json_object" } } : {}),
           messages: [
-            { role: "system", content: system },
+            {
+              role: "system",
+              content:
+                system +
+                (json && isGptOss
+                  ? "\nIMPORTANT: Respond with ONLY raw JSON — no markdown code fences, no commentary. The response must start with { and end with }."
+                  : ""),
+            },
             { role: "user", content: user },
           ],
         }),
@@ -85,21 +96,26 @@ export async function groqChat(
       }
 
       const data = await res.json();
-      const content = data?.choices?.[0]?.message?.content;
+      const message = data?.choices?.[0]?.message;
+      const content = message?.content;
+      const reasoning = message?.reasoning;
       const finish = data?.choices?.[0]?.finish_reason;
-      if (typeof content !== "string" || !content.trim()) {
-        if (attempt < retries) {
-          lastErr = new Error("empty");
-          await sleep(3000);
-          continue;
-        }
+      if (typeof content === "string" && content.trim()) return content;
+      // Some gpt-oss builds deliver the finished answer in `reasoning`.
+      if (typeof reasoning === "string" && reasoning.trim()) return reasoning;
+      if (attempt < retries) {
+        lastErr = new Error("empty");
+        await sleep(3000);
+        continue;
+      }
+      if (finish === "length") {
         throw new Error(
-          finish === "length"
-            ? "The model ran out of tokens before finishing its reply. Lower the shortlist size or batch count, or switch to GPT-OSS 20B in Settings."
-            : "Groq returned an empty response (the model spent its token budget on internal reasoning). Try again, or switch to GPT-OSS 20B in Settings."
+          "The model ran out of tokens before finishing its reply. Lower the shortlist size or batch count, or switch to GPT-OSS 20B in Settings."
         );
       }
-      return content;
+      throw new Error(
+        `Groq returned no content (model: ${s.model}, finish_reason: ${finish ?? "none"}). Try once more — if it repeats, switch to GPT-OSS 20B in Settings.`
+      );
     } catch (e) {
       lastErr = e;
       // Network-level failures are retryable too.

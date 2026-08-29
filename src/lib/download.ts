@@ -128,15 +128,40 @@ export function mdToHtml(md: string): string {
   return html;
 }
 
+/** True when the app runs inside an iframe (preview sandboxes may block downloads). */
+export function inFrame(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 800);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/** Copies formatted HTML + plain text to the clipboard — pastes straight into MS Word. */
+export async function copyRichText(html: string, plain: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }),
+        "text/plain": new Blob([plain], { type: "text/plain" }),
+      }),
+    ]);
+    return true;
+  } catch {
+    return copyText(plain);
+  }
 }
 
 const DOC_STYLES = `body{font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:11pt;color:#1c1c1c;line-height:1.5;margin:24px}

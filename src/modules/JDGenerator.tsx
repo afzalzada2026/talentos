@@ -1,20 +1,23 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { JDLibItem, Settings } from "../lib/types";
 import { LEVELS } from "../lib/types";
 import { groqChat } from "../lib/groq";
-import { mdToHtml, printPdf, saveAsDoc, saveText, slug, copyText } from "../lib/download";
+import { copyRichText, copyText, inFrame, mdToHtml, printPdf, saveAsDoc, saveText, slug } from "../lib/download";
+import { extractDocxText } from "../lib/docx";
 import { DEFAULT_JD_TEMPLATE } from "../lib/demo";
 import { useLocalStorage } from "../lib/store";
-import { Btn, Card, Field, Spinner, areaCls, inputCls, useToast } from "../components/ui";
+import { Btn, Card, Field, Modal, Spinner, areaCls, inputCls, useToast } from "../components/ui";
 import {
   IconChevron,
   IconCopy,
   IconDoc,
   IconDownload,
+  IconEye,
   IconInbox,
   IconPrint,
   IconSpark,
   IconTrash,
+  IconUpload,
   IconWand,
 } from "../components/icons";
 
@@ -41,8 +44,59 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [library, setLibrary] = useLocalStorage<JDLibItem[]>("talentos.jdLibrary", []);
+  const [viewOpen, setViewOpen] = useState(false);
+  const tplFileRef = useRef<HTMLInputElement>(null);
+  const frameWarned = useRef(false);
 
   const effLevel = level === "Custom…" ? customLevel.trim() || "—" : level;
+
+  /** Reads a company JD format from a file — .docx is parsed locally, .txt/.md read as-is. */
+  async function onTemplateFile(f: File | null) {
+    if (!f) return;
+    const name = f.name.toLowerCase();
+    try {
+      if (name.endsWith(".docx")) {
+        const text = await extractDocxText(await f.arrayBuffer());
+        setTemplate(text);
+        setShowTemplate(true);
+        toast("success", `Read “${f.name}” locally — headings & bullets preserved (${text.length.toLocaleString()} chars).`);
+      } else if (name.endsWith(".doc")) {
+        toast("error", "Legacy .doc files can't be read in-browser. Save it as .docx in Word, or paste the text.");
+      } else {
+        const text = await f.text();
+        if (!text.trim()) throw new Error("That file is empty.");
+        setTemplate(text);
+        setShowTemplate(true);
+        toast("success", `Loaded “${f.name}” as the company JD format.`);
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Could not read that file.");
+    }
+  }
+
+  /** Wraps every download with feedback; warns once if a preview frame may block saves. */
+  function dl(fn: () => void, label: string) {
+    try {
+      fn();
+      toast("success", label);
+      if (inFrame() && !frameWarned.current) {
+        frameWarned.current = true;
+        setTimeout(
+          () => toast("info", "You're inside a preview frame — if the file didn't save, use Open → “Copy for Word” instead."),
+          500
+        );
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Download failed.");
+    }
+  }
+
+  async function copyForWord() {
+    if (!result) return;
+    (await copyRichText(mdToHtml(result.md), result.md))
+      ? toast("success", "Formatted JD copied — paste it into a blank Word document (Ctrl+V).")
+      : toast("error", "Clipboard is blocked here — use the Word download instead.");
+  }
 
   async function generate() {
     setError("");
@@ -143,10 +197,39 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
           >
             <div>
               <h3 className="font-display text-[15px] font-bold tracking-tight">Company JD format</h3>
-              <p className="text-[12px] text-ink3">Paste a sample JD — the AI copies its exact structure.</p>
+              <p className="text-[12px] text-ink3">Upload your sample JD (.docx) or paste it — the AI mirrors its exact structure.</p>
             </div>
-            <IconChevron className={`h-4 w-4 text-ink3 transition-transform duration-200 ${showTemplate ? "rotate-180" : ""}`} />
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  tplFileRef.current?.click();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    tplFileRef.current?.click();
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-line2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-ink2 transition-all hover:border-pine-400 hover:text-pine-700 active:translate-y-px"
+              >
+                <IconUpload className="h-3.5 w-3.5" /> Upload .docx
+              </span>
+              <IconChevron className={`h-4 w-4 text-ink3 transition-transform duration-200 ${showTemplate ? "rotate-180" : ""}`} />
+            </span>
           </button>
+          <input
+            ref={tplFileRef}
+            type="file"
+            accept=".docx,.doc,.txt,.md,.text"
+            className="hidden"
+            onChange={(e) => {
+              onTemplateFile(e.target.files?.[0] ?? null);
+              e.target.value = "";
+            }}
+          />
           {showTemplate && (
             <div className="anim-fade border-t border-line p-5 pt-4">
               <textarea
@@ -224,16 +307,19 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
             </div>
             {result && (
               <div className="flex flex-wrap gap-1.5">
-                <Btn variant="gold" size="sm" onClick={() => { saveAsDoc(result.md, `${fileBase()}.doc`, result.title); toast("success", "Word (.doc) downloaded."); }}>
+                <Btn variant="primary" size="sm" onClick={() => setViewOpen(true)}>
+                  <IconEye className="h-3.5 w-3.5" /> Open
+                </Btn>
+                <Btn variant="gold" size="sm" onClick={() => dl(() => saveAsDoc(result.md, `${fileBase()}.doc`, result.title), "Word (.doc) downloaded.")}>
                   <IconDownload className="h-3.5 w-3.5" /> Word
                 </Btn>
                 <Btn variant="outline" size="sm" onClick={() => printPdf(result.md, result.title)}>
                   <IconPrint className="h-3.5 w-3.5" /> PDF
                 </Btn>
-                <Btn variant="outline" size="sm" onClick={() => { saveText(result.md, `${fileBase()}.md`, "text/markdown"); toast("success", "Markdown downloaded."); }}>
+                <Btn variant="outline" size="sm" onClick={() => dl(() => saveText(result.md, `${fileBase()}.md`, "text/markdown"), "Markdown downloaded.")}>
                   .md
                 </Btn>
-                <Btn variant="outline" size="sm" onClick={() => { saveText(result.md, `${fileBase()}.txt`, "text/plain"); toast("success", "Plain text downloaded."); }}>
+                <Btn variant="outline" size="sm" onClick={() => dl(() => saveText(result.md, `${fileBase()}.txt`, "text/plain"), "Plain text downloaded.")}>
                   .txt
                 </Btn>
                 <Btn variant="outline" size="sm" onClick={async () => ((await copyText(result.md)) ? toast("success", "Markdown copied.") : toast("error", "Copy failed."))}>
@@ -276,6 +362,34 @@ export default function JDGenerator({ settings, onOpenSettings }: { settings: Se
           </div>
         </Card>
       </div>
+
+      {/* -------- document viewer (always works, even where downloads are blocked) -------- */}
+      <Modal open={viewOpen && !!result} onClose={() => setViewOpen(false)} title={result?.title ?? "JD document"} width="max-w-3xl">
+        {result && (
+          <div>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <Btn variant="gold" size="sm" onClick={copyForWord}>
+                <IconCopy className="h-3.5 w-3.5" /> Copy for Word
+              </Btn>
+              <Btn variant="outline" size="sm" onClick={async () => ((await copyText(result.md)) ? toast("success", "Markdown copied.") : toast("error", "Copy failed."))}>
+                Copy Markdown
+              </Btn>
+              <Btn variant="outline" size="sm" onClick={() => dl(() => saveAsDoc(result.md, `${fileBase()}.doc`, result.title), "Word (.doc) downloaded.")}>
+                <IconDownload className="h-3.5 w-3.5" /> Word (.doc)
+              </Btn>
+              <Btn variant="outline" size="sm" onClick={() => printPdf(result.md, result.title)}>
+                <IconPrint className="h-3.5 w-3.5" /> Print / PDF
+              </Btn>
+            </div>
+            <div className="max-h-[56vh] overflow-y-auto rounded-xl border border-line bg-white px-6 py-6 sm:px-8">
+              <article className="md" dangerouslySetInnerHTML={{ __html: mdToHtml(result.md) }} />
+            </div>
+            <p className="mt-3 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink3">
+              “Copy for Word” puts the formatted JD on your clipboard — paste it into a blank document with Ctrl+V
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

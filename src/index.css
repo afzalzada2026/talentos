@@ -1,1 +1,302 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-paper: #eff2ee;
+  --color-panel: #fbfcfa;
+  --color-ink: #17251f;
+  --color-ink2: #47574e;
+  --color-ink3: #7d8b81;
+  --color-line: #dde4dc;
+  --color-line2: #c7d1c6;
+
+  --color-pine-950: #071a13;
+  --color-pine-900: #0b241b;
+  --color-pine-800: #103327;
+  --color-pine-700: #144431;
+  --color-pine-600: #1a5a41;
+  --color-pine-500: #227151;
+  --color-pine-400: #3f8f6e;
+  --color-pine-200: #b9d4c6;
+  --color-pine-100: #dcebe2;
+  --color-pine-50: #edf4ef;
+
+  --color-gold-600: #a86f1e;
+  --color-gold-500: #c98a2d;
+  --color-gold-400: #dca44f;
+  --color-gold-200: #efd9ac;
+  --color-gold-100: #f7ead0;
+
+  --color-open: #3d7ea6;
+  --color-short: #c07f22;
+  --color-interview: #8a5a9e;
+  --color-offer: #2f8f83;
+  --color-hold: #78857a;
+  --color-cancel: #b4553f;
+  --color-onboarded: #2e7d4f;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--color-gold-200);
+  }
+}
+
+/* ---------- ambient background ---------- */
+.bg-grid {
+  background-image: linear-gradient(to right, rgba(20, 68, 49, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(20, 68, 49, 0.045) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* ---------- scrollbars ---------- */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c3cec4;
+  border-radius: 8px;
+  border: 2.5px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #a9b8ab;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- motion ---------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes toastin {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes scanx {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+@keyframes pulsedot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes shimmerx {
+  0% {
+    background-position: -420px 0;
+  }
+  100% {
+    background-position: 420px 0;
+  }
+}
+
+.anim-rise {
+  animation: rise 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+.anim-pop {
+  animation: pop 0.28s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+.anim-fade {
+  animation: fadein 0.25s ease both;
+}
+.anim-toast {
+  animation: toastin 0.3s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+.pulse-dot {
+  animation: pulsedot 1.4s ease-in-out infinite;
+}
+.scanbar {
+  position: relative;
+  overflow: hidden;
+}
+.scanbar > span {
+  position: absolute;
+  inset: 0;
+  width: 34%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(220, 164, 79, 0.85), transparent);
+  animation: scanx 1.5s ease-in-out infinite;
+}
+.shimmer {
+  background: linear-gradient(90deg, rgba(23, 37, 31, 0.04) 25%, rgba(23, 37, 31, 0.1) 50%, rgba(23, 37, 31, 0.04) 75%);
+  background-size: 420px 100%;
+  animation: shimmerx 1.3s linear infinite;
+}
+
+/* ---------- inline spreadsheet cells ---------- */
+.cell {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  padding: 0.32rem 0.5rem;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.cell:hover {
+  border-color: var(--color-line2);
+}
+.cell:focus {
+  border-color: var(--color-pine-500);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(34, 113, 81, 0.12);
+}
+
+/* ---------- rendered markdown (JD preview) ---------- */
+.md h1 {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  margin: 1.1rem 0 0.5rem;
+}
+.md h1:first-child {
+  margin-top: 0;
+}
+.md h2 {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--color-pine-700);
+  margin: 1.2rem 0 0.4rem;
+  padding-bottom: 0.28rem;
+  border-bottom: 1px solid var(--color-line);
+}
+.md h3 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-ink);
+  margin: 0.95rem 0 0.3rem;
+}
+.md h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-ink2);
+  margin: 0.8rem 0 0.25rem;
+}
+.md p {
+  margin: 0.42rem 0;
+  font-size: 0.86rem;
+  line-height: 1.68;
+  color: #2c3a33;
+}
+.md ul,
+.md ol {
+  margin: 0.42rem 0 0.42rem 1.3rem;
+  font-size: 0.86rem;
+  line-height: 1.62;
+  color: #2c3a33;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.22rem 0;
+}
+.md strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.md hr {
+  border: none;
+  border-top: 1px dashed var(--color-line2);
+  margin: 1rem 0;
+}
+.md blockquote {
+  border-left: 3px solid var(--color-gold-400);
+  background: rgba(247, 234, 208, 0.5);
+  padding: 0.2rem 0.85rem;
+  color: var(--color-ink2);
+  font-size: 0.85rem;
+  margin: 0.6rem 0;
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+.md table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.7rem 0;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-line2);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.md th {
+  background: var(--color-pine-50);
+  font-weight: 600;
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  background: var(--color-pine-50);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}

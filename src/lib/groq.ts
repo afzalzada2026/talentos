@@ -1,14 +1,16 @@
 import type { Settings } from "./types";
 
+/** Models currently served on Groq's free tier. GPT-OSS is the best chat model most free keys get. */
 export const GROQ_MODELS = [
-  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile — best quality" },
-  { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B — balanced" },
-  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant — fastest, free-tier friendly" },
+  { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B — best chat model on free keys (recommended)" },
+  { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B — faster, lighter on free-tier rate limits" },
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B — if available on your key" },
+  { id: "moonshotai/kimi-k2-instruct-0905", label: "Kimi K2 Instruct — if available on your key" },
 ] as const;
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
-  model: "llama-3.3-70b-versatile",
+  model: "openai/gpt-oss-120b",
   temperature: 0.2,
 };
 
@@ -68,6 +70,11 @@ export async function groqChat(
         if (res.status === 429 && attempt < retries) {
           lastErr = new Error(`${msg} — backing off and retrying…`);
           continue;
+        }
+        if ((res.status === 400 || res.status === 404) && /model/i.test(msg)) {
+          throw new Error(
+            `${msg} — this model isn't on your key. Open Settings and choose GPT-OSS 120B (the default free-tier chat model).`
+          );
         }
         throw new Error(msg);
       }

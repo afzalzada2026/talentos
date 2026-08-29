@@ -103,7 +103,7 @@ export default function SettingsDrawer({
               >
                 console.groq.com/keys
               </a>
-              . No budget needed — Groq's Llama models run on a free tier.
+              . No budget needed — Groq hosts these open models on a free tier.
             </p>
             <div className="flex items-center gap-2 pt-1">
               <Btn variant="outline" size="sm" onClick={test} disabled={testing === "busy"}>
@@ -124,6 +124,9 @@ export default function SettingsDrawer({
           <section className="space-y-2">
             <Field label="Model">
               <select className={inputCls + " cursor-pointer"} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>
+                {!GROQ_MODELS.some((m) => m.id === draft.model) && (
+                  <option value={draft.model}>{draft.model} — saved, not on the free-tier list (may fail)</option>
+                )}
                 {GROQ_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
@@ -132,7 +135,8 @@ export default function SettingsDrawer({
               </select>
             </Field>
             <p className="text-[12px] leading-relaxed text-ink3">
-              Hitting free-tier rate limits on huge CV files? Switch heavy screening runs to <strong className="text-ink2">Llama 3.1 8B Instant</strong> — it processes batches far faster.
+              Hitting free-tier rate limits on huge CV files? Switch heavy screening runs to{" "}
+              <strong className="text-ink2">GPT-OSS 20B</strong> — it processes batches far faster. If a run errors with “model not found”, your key doesn't host it — pick the first option instead.
             </p>
           </section>
 

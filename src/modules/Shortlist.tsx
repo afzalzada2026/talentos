@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { CandidateSummary, CvBlock, Settings } from "../lib/types";
-import { extractJson, getProvider, groqChat } from "../lib/groq";
+import { estimateTokens, extractJson, getProvider, getTpm, groqChat } from "../lib/groq";
 import { splitCvs } from "../lib/cv";
 import { copyText, smartDownload, toCsv } from "../lib/download";
 import { extractDocxText } from "../lib/docx";
@@ -31,16 +31,13 @@ Rules: score is an integer 0-100 judged strictly against the JD (skills, years, 
 const RANK_SYS = `You are a Head of Talent Acquisition finalising a shortlist. You receive AI-extracted candidate summaries plus the job description. Re-assess every candidate against the JD, keep only the top N best matches, rank them (1 = best), and sharpen each "why".
 Respond with ONLY a valid JSON object: {"shortlist":[ ...candidate objects with the same fields, sorted best first... ]} where "why" is 1-2 compelling sentences citing specific JD requirements the candidate meets. Do not add candidates that are not in the summaries and do not invent data.`;
 
-const BATCH_BUDGET = 42000;
-const CV_CAP = 6000;
-
-function makeBatches(blocks: CvBlock[]): CvBlock[][] {
+function makeBatches(blocks: CvBlock[], batchChars: number, cvCap: number): CvBlock[][] {
   const batches: CvBlock[][] = [];
   let cur: CvBlock[] = [];
   let size = 0;
   for (const b of blocks) {
-    const t = Math.min(b.text.length, CV_CAP) + 60;
-    if (cur.length && size + t > BATCH_BUDGET) {
+    const t = Math.min(b.text.length, cvCap) + 60;
+    if (cur.length && size + t > batchChars) {
       batches.push(cur);
       cur = [];
       size = 0;
@@ -50,6 +47,25 @@ function makeBatches(blocks: CvBlock[]): CvBlock[][] {
   }
   if (cur.length) batches.push(cur);
   return batches;
+}
+
+/**
+ * Sizes CV batches so that prompt + reserved output fits inside the model's
+ * tokens-per-minute budget (e.g. Groq free tier: 8,000 TPM on GPT-OSS 120B).
+ */
+function planScreening(settings: Settings, jd: string) {
+  const tpm = getTpm(settings);
+  const fixedTokens = estimateTokens(SCREEN_SYS) + estimateTokens(jd) + 80;
+  const outReserve = Math.max(1024, Math.floor(tpm * 0.28));
+  const availTokens = Math.floor(tpm * 0.85) - fixedTokens - outReserve;
+  const chars = Math.floor(availTokens * 3.2);
+  return {
+    tpm,
+    outReserve,
+    availTokens,
+    batchChars: Math.max(1200, Math.min(42000, chars)),
+    cvCap: Math.max(1000, Math.min(6000, chars)),
+  };
 }
 
 function norm(c: any, fallbackName?: string): CandidateSummary {
@@ -116,6 +132,11 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
   }
 
   const split = useMemo(() => (cvText.trim() ? splitCvs(cvText, sep) : { blocks: [], method: "empty" }), [cvText, sep]);
+  const previewPlan = useMemo(
+    () => (cvText.trim() ? planScreening(settings, jd) : null),
+    [cvText, settings, jd]
+  );
+  const batchCount = previewPlan ? makeBatches(split.blocks, previewPlan.batchChars, previewPlan.cvCap).length : 0;
   const running = phase.kind === "screen" || phase.kind === "rank";
 
   function loadDemo() {
@@ -162,7 +183,14 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
       toast("info", "Only 1 CV block detected — set a custom separator if this file holds many CVs.");
     }
 
-    const batches = makeBatches(split.blocks);
+    const plan = planScreening(settings, jd);
+    if (plan.availTokens < 900) {
+      setError(
+        "The JD is too long for this model's free tokens-per-minute budget. Switch to Google Gemini (1M context) in Settings, use GPT-OSS 20B, or shorten the JD."
+      );
+      return;
+    }
+    const batches = makeBatches(split.blocks, plan.batchChars, plan.cvCap);
     cancelRef.current = false;
 
     try {
@@ -173,13 +201,13 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
         if (cancelRef.current) throw new Error("__cancelled__");
         setPhase({ kind: "screen", batch: i, batches: batches.length, screened: all.length });
         const batchText = batches[i]
-          .map((b) => `<<<CV name="${b.name}">>>\n${b.text.slice(0, CV_CAP)}\n<<<END>>>`)
+          .map((b) => `<<<CV name="${b.name}">>>\n${b.text.slice(0, plan.cvCap)}\n<<<END>>>`)
           .join("\n\n");
         const raw = await groqChat(
           settings,
           SCREEN_SYS,
           `JOB DESCRIPTION:\n"""\n${jd}\n"""\n\nScreen every CV below and return one summary object per CV.\n\n${batchText}`,
-          { json: true, maxTokens: 8192, reasoning: "low" }
+          { json: true, maxTokens: plan.outReserve, reasoning: "low" }
         );
         const j = extractJson(raw);
         const list: any[] = Array.isArray(j) ? j : j?.candidates ?? j?.shortlist ?? [];
@@ -193,12 +221,22 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
       let finalList: CandidateSummary[];
       if (all.length > topN) {
         setPhase({ kind: "rank" });
-        const pool = [...all].sort((a, b) => b.score - a.score).slice(0, 400);
+        // Keep the ranking pool inside the same token budget.
+        const sorted = [...all].sort((a, b) => b.score - a.score);
+        const pool: CandidateSummary[] = [];
+        for (const c of sorted) {
+          if (pool.length >= 60) break;
+          pool.push(c);
+          if (estimateTokens(JSON.stringify(pool)) > plan.availTokens * 0.8) {
+            pool.pop();
+            break;
+          }
+        }
         const raw = await groqChat(
           settings,
           RANK_SYS,
           `Shortlist size N = ${topN}\n\nJOB DESCRIPTION:\n"""\n${jd}\n"""\n\nCANDIDATE SUMMARIES (JSON):\n${JSON.stringify(pool)}`,
-          { json: true, maxTokens: 8192, reasoning: "low" }
+          { json: true, maxTokens: plan.outReserve, reasoning: "low" }
         );
         const j = extractJson(raw);
         const list: any[] = Array.isArray(j) ? j : j?.shortlist ?? j?.candidates ?? [];
@@ -400,7 +438,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
                   <h3 className="font-display text-[15px] font-bold tracking-tight text-white">Screening pipeline</h3>
                 </div>
                 <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-pine-200">
-                  {getProvider(settings).name} · {settings.model.split("/").pop()?.replace(":free", "").slice(0, 16)}
+                  {getProvider(settings).name} · {(getTpm(settings) / 1000).toFixed(0)}k TPM
                 </span>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2">
@@ -409,7 +447,7 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-pine-200">CVs found</p>
                 </div>
                 <div className="rounded-lg bg-white/5 px-3 py-2">
-                  <p className="font-display text-xl font-bold text-white">{cvText ? makeBatches(split.blocks).length : 0}</p>
+                  <p className="font-display text-xl font-bold text-white">{batchCount}</p>
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-pine-200">AI batches</p>
                 </div>
                 <div className="rounded-lg bg-white/5 px-3 py-2">
@@ -448,7 +486,8 @@ export default function Shortlist({ settings, onOpenSettings }: { settings: Sett
                 <div className="pt-1">
                   <Bar pct={((phase.batch + 0.4) / Math.max(1, phase.batches)) * 100} />
                   <p className="mt-1.5 font-mono text-[11px] text-ink3">
-                    {phase.screened} candidate summaries extracted · free tier may pause ~30s between batches
+                    {phase.screened} summaries extracted · auto-pacing to stay under the{" "}
+                    {((previewPlan?.tpm ?? getTpm(settings)) / 1000).toFixed(0)}k tokens/min free budget — pauses are normal
                   </p>
                 </div>
               )}

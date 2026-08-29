@@ -75,6 +75,51 @@ export function getProvider(s: Settings): ProviderInfo {
   return PROVIDERS[s.provider] ?? PROVIDERS.groq;
 }
 
+/* ---------------- free-tier token budgeting ----------------
+ * Groq's free tier bills in tokens-per-minute (TPM). GPT-OSS 120B allows only
+ * ~8,000 TPM, and a request's reserved output counts toward it. So every call
+ * is (a) sized to fit the minute budget and (b) paced through a rolling
+ * 60-second window so consecutive batches never exceed it.
+ */
+const MODEL_TPM: Record<string, number> = {
+  "openai/gpt-oss-120b": 8000,
+  "openai/gpt-oss-20b": 8000,
+};
+const PROVIDER_TPM: Record<string, number> = {
+  groq: 12000,
+  gemini: 100000,
+  openrouter: 100000,
+  cerebras: 100000,
+};
+
+/** Tokens-per-minute budget for the configured model (conservative). */
+export function getTpm(s: Settings): number {
+  return MODEL_TPM[s.model] ?? PROVIDER_TPM[s.provider ?? "groq"] ?? 100000;
+}
+
+/** Rough token estimate (≈3.6 chars/token for English/mixed text). */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.6);
+}
+
+const minuteWindow: { t: number; tokens: number }[] = [];
+
+/** Waits (if needed) until `tokens` fits inside the rolling 1-minute budget. */
+async function pace(s: Settings, tokens: number): Promise<void> {
+  const budget = Math.floor(getTpm(s) * 0.85);
+  for (;;) {
+    const now = Date.now();
+    while (minuteWindow.length && now - minuteWindow[0].t > 60000) minuteWindow.shift();
+    const used = minuteWindow.reduce((a, e) => a + e.tokens, 0);
+    if (used + tokens <= budget) {
+      minuteWindow.push({ t: now, tokens });
+      return;
+    }
+    const oldest = minuteWindow[0]?.t ?? now;
+    await sleep(Math.max(1200, 60000 - (now - oldest) + 400));
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface ChatOpts {
@@ -101,9 +146,14 @@ export async function groqChat(
   }
 
   const isGptOss = s.model.includes("gpt-oss");
+  const tpm = getTpm(s);
+  // Reserved output must leave room for the prompt inside the minute budget.
+  const effMax = Math.min(maxTokens, Math.max(512, Math.floor(tpm * 0.4)));
+  const reserved = estimateTokens(system) + estimateTokens(user) + 80 + effMax;
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(attempt === 1 ? 9000 : 22000);
+    await pace(s, reserved);
     try {
       const res = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: "POST",
@@ -121,7 +171,7 @@ export async function groqChat(
           ...(isGptOss
             ? { temperature: 1, top_p: 1, reasoning_effort: opts?.reasoning ?? "low" }
             : { temperature: s.temperature }),
-          max_completion_tokens: maxTokens,
+          max_completion_tokens: effMax,
           ...(json && !isGptOss ? { response_format: { type: "json_object" } } : {}),
           messages: [
             {
@@ -148,6 +198,18 @@ export async function groqChat(
         if (res.status === 429 && attempt < retries) {
           lastErr = new Error(`${msg} — backing off and retrying…`);
           continue;
+        }
+        // Free-tier TPM overflow: a single request larger than the minute
+        // budget. Wait out the window and retry once.
+        if (res.status === 400 && /tokens per minute|request too large/i.test(msg)) {
+          if (attempt < retries) {
+            lastErr = new Error(`${msg} — waiting for the token budget to reset…`);
+            await sleep(62000);
+            continue;
+          }
+          throw new Error(
+            "This request exceeds the model's free-tier tokens-per-minute limit. Switch to GPT-OSS 20B or Google Gemini in Settings, or shorten the JD."
+          );
         }
         if ((res.status === 400 || res.status === 404) && /model/i.test(msg)) {
           throw new Error(

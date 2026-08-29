@@ -1,5 +1,16 @@
+# Dependencies & build output — never push these to GitHub
 node_modules/
-.next/
 dist/
-build/
+dist-ssr/
+
+# Local environment & editor files
+.env
+.env.local
+*.local
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 *.log
+.next/
+build/

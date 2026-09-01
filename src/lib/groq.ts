@@ -1,9 +1,31 @@
 import type { ProviderId, Settings } from "./types";
+import {
+  MODEL_TPM,
+  PROVIDER_TPM,
+  TOKEN_BUDGET_MARGIN,
+  CHARS_PER_TOKEN,
+  DEFAULT_MAX_TOKENS,
+  MIN_RESERVED_TOKENS,
+  MAX_TOKENS_TPM_FRACTION,
+  GPT_OSS_TEMPERATURE,
+  GPT_OSS_TOP_P,
+  GPT_OSS_REASONING_EFFORT,
+  DEFAULT_RETRIES,
+  RETRY_DELAYS_MS,
+  EMPTY_RESPONSE_RETRY_DELAY_MS,
+  TPM_RESET_WAIT_MS,
+  MIN_PACE_WAIT_MS,
+  BUDGET_RESET_BUFFER_MS,
+  EXCLUDED_MODEL_PATTERNS,
+  GEMINI_MODEL_PATTERN,
+  OPENROUTER_FREE_PATTERN,
+  MAX_MODELS_DISPLAY,
+} from "./constants";
 
 export interface ProviderInfo {
   id: ProviderId;
   name: string;
-  baseUrl: string; // OpenAI-compatible root (no trailing slash)
+  baseUrl: string;
   keyUrl: string;
   blurb: string;
   models: { id: string; label: string }[];
@@ -81,16 +103,6 @@ export function getProvider(s: Settings): ProviderInfo {
  * is (a) sized to fit the minute budget and (b) paced through a rolling
  * 60-second window so consecutive batches never exceed it.
  */
-const MODEL_TPM: Record<string, number> = {
-  "openai/gpt-oss-120b": 8000,
-  "openai/gpt-oss-20b": 8000,
-};
-const PROVIDER_TPM: Record<string, number> = {
-  groq: 12000,
-  gemini: 100000,
-  openrouter: 100000,
-  cerebras: 100000,
-};
 
 /** Tokens-per-minute budget for the configured model (conservative). */
 export function getTpm(s: Settings): number {
@@ -99,14 +111,14 @@ export function getTpm(s: Settings): number {
 
 /** Rough token estimate (≈3.6 chars/token for English/mixed text). */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3.6);
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 const minuteWindow: { t: number; tokens: number }[] = [];
 
 /** Waits (if needed) until `tokens` fits inside the rolling 1-minute budget. */
 async function pace(s: Settings, tokens: number): Promise<void> {
-  const budget = Math.floor(getTpm(s) * 0.85);
+  const budget = Math.floor(getTpm(s) * TOKEN_BUDGET_MARGIN);
   for (;;) {
     const now = Date.now();
     while (minuteWindow.length && now - minuteWindow[0].t > 60000) minuteWindow.shift();
@@ -116,7 +128,7 @@ async function pace(s: Settings, tokens: number): Promise<void> {
       return;
     }
     const oldest = minuteWindow[0]?.t ?? now;
-    await sleep(Math.max(1200, 60000 - (now - oldest) + 400));
+    await sleep(Math.max(MIN_PACE_WAIT_MS, 60000 - (now - oldest) + BUDGET_RESET_BUFFER_MS));
   }
 }
 
@@ -139,7 +151,7 @@ export async function groqChat(
   user: string,
   opts?: ChatOpts
 ): Promise<string> {
-  const { json = false, maxTokens = 6000, retries = 2 } = opts ?? {};
+  const { json = false, maxTokens = DEFAULT_MAX_TOKENS, retries = DEFAULT_RETRIES } = opts ?? {};
   const provider = getProvider(s);
   if (!s.apiKey.trim()) {
     throw new Error(`Add your free ${provider.name} API key in Settings first (${provider.keyUrl}).`);
@@ -148,11 +160,11 @@ export async function groqChat(
   const isGptOss = s.model.includes("gpt-oss");
   const tpm = getTpm(s);
   // Reserved output must leave room for the prompt inside the minute budget.
-  const effMax = Math.min(maxTokens, Math.max(512, Math.floor(tpm * 0.4)));
+  const effMax = Math.min(maxTokens, Math.max(MIN_RESERVED_TOKENS, Math.floor(tpm * MAX_TOKENS_TPM_FRACTION)));
   const reserved = estimateTokens(system) + estimateTokens(user) + 80 + effMax;
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) await sleep(attempt === 1 ? 9000 : 22000);
+    if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]);
     await pace(s, reserved);
     try {
       const res = await fetch(`${provider.baseUrl}/chat/completions`, {
@@ -169,7 +181,7 @@ export async function groqChat(
           // requested via the prompt instead, and reasoning effort is capped
           // so internal "thinking" can't eat the completion budget.
           ...(isGptOss
-            ? { temperature: 1, top_p: 1, reasoning_effort: opts?.reasoning ?? "low" }
+            ? { temperature: GPT_OSS_TEMPERATURE, top_p: GPT_OSS_TOP_P, reasoning_effort: opts?.reasoning ?? GPT_OSS_REASONING_EFFORT }
             : { temperature: s.temperature }),
           // Groq (gpt-oss) needs max_completion_tokens; Google's compat layer
           // only accepts the legacy max_tokens field.
@@ -206,7 +218,7 @@ export async function groqChat(
         if (res.status === 400 && /tokens per minute|request too large/i.test(msg)) {
           if (attempt < retries) {
             lastErr = new Error(`${msg} — waiting for the token budget to reset…`);
-            await sleep(62000);
+            await sleep(TPM_RESET_WAIT_MS);
             continue;
           }
           throw new Error(
@@ -215,7 +227,7 @@ export async function groqChat(
         }
         if ((res.status === 400 || res.status === 404) && /model/i.test(msg)) {
           throw new Error(
-            `${msg} — this model isn't available on your key. In Settings, use “Fetch available models” to list the models your key can actually use.`
+            `${msg} — this model isn't available on your key. In Settings, use "Fetch available models" to list the models your key can actually use.`
           );
         }
         throw new Error(`[${res.status}] ${msg}`);
@@ -231,7 +243,7 @@ export async function groqChat(
       if (typeof reasoning === "string" && reasoning.trim()) return reasoning;
       if (attempt < retries) {
         lastErr = new Error("empty");
-        await sleep(3000);
+        await sleep(EMPTY_RESPONSE_RETRY_DELAY_MS);
         continue;
       }
       if (finish === "length") {
@@ -302,17 +314,17 @@ export async function fetchModels(s: Settings): Promise<{ id: string; label: str
   const ids: string[] = Array.isArray(data?.data)
     ? data.data.map((m: any) => String(m?.id ?? "")).filter(Boolean)
     : [];
-  const drop = /embed|tts|whisper|speech|dall|sora|imagen/i;
+  const drop = EXCLUDED_MODEL_PATTERNS;
   let kept = Array.from(new Set(ids.filter((id) => !drop.test(id))));
-  if (s.provider === "gemini") kept = kept.filter((id) => /gemini/i.test(id));
+  if (s.provider === "gemini") kept = kept.filter((id) => GEMINI_MODEL_PATTERN.test(id));
   kept.sort((a, b) => a.localeCompare(b));
   if (s.provider === "openrouter") {
     // Surface the ":free" lineup first — that's what the free tier serves.
-    kept.sort((a, b) => Number(/:free$/.test(b)) - Number(/:free$/.test(a)));
+    kept.sort((a, b) => Number(OPENROUTER_FREE_PATTERN.test(b)) - Number(OPENROUTER_FREE_PATTERN.test(a)));
   }
-  const out = kept.slice(0, 60).map((id) => ({
+  const out = kept.slice(0, MAX_MODELS_DISPLAY).map((id) => ({
     id,
-    label: id + (s.provider === "openrouter" && /:free$/.test(id) ? " · free" : ""),
+    label: id + (s.provider === "openrouter" && OPENROUTER_FREE_PATTERN.test(id) ? " · free" : ""),
   }));
   if (!out.length) throw new Error("The provider returned no usable chat models for this key.");
   return out;

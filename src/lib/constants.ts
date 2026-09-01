@@ -19,6 +19,7 @@ export const PROVIDER_TPM: Record<string, number> = {
   gemini: 100000,
   openrouter: 100000,
   cerebras: 100000,
+  nararouter: 300000, // ~5M tokens/day ≈ 3,472 tokens/min average; generous limit for pacing
 };
 
 /** Safety margin for token budget usage (85% of limit) */

@@ -29,7 +29,11 @@ export interface ProviderInfo {
   keyUrl: string;
   blurb: string;
   models: { id: string; label: string }[];
+  requiresProxy?: boolean; // Flag to indicate if provider typically needs a CORS proxy
 }
+
+// CORS proxy for development (many AI providers block direct browser calls)
+const CORS_PROXY = "https://corsproxy.io/?";
 
 /** Free OpenAI-compatible providers. All four support /chat/completions with a Bearer key. */
 export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
@@ -83,6 +87,20 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
       { id: "llama-3.1-8b", label: "Llama 3.1 8B — fastest" },
     ],
   },
+  nararouter: {
+    id: "nararouter",
+    name: "NaraRouter",
+    baseUrl: "https://router.bynara.id/v1",
+    keyUrl: "https://console.bynara.id/keys",
+    blurb: "OpenAI-compatible gateway to 34+ models with 5M free tokens/day (no credit card required). May require CORS proxy for browser calls.",
+    requiresProxy: true, // NaraRouter blocks direct browser calls
+    models: [
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash — fast, efficient (recommended)" },
+      { id: "deepseek-chat", label: "DeepSeek Chat — balanced quality/speed" },
+      { id: "qwen-2.5-72b-instruct", label: "Qwen 2.5 72B — strong open model" },
+      { id: "llama-3.3-70b-instruct", label: "Llama 3.3 70B — versatile all-rounder" },
+    ],
+  },
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -96,13 +114,6 @@ export const DEFAULT_SETTINGS: Settings = {
 export function getProvider(s: Settings): ProviderInfo {
   return PROVIDERS[s.provider] ?? PROVIDERS.groq;
 }
-
-/* ---------------- free-tier token budgeting ----------------
- * Groq's free tier bills in tokens-per-minute (TPM). GPT-OSS 120B allows only
- * ~8,000 TPM, and a request's reserved output counts toward it. So every call
- * is (a) sized to fit the minute budget and (b) paced through a rolling
- * 60-second window so consecutive batches never exceed it.
- */
 
 /** Tokens-per-minute budget for the configured model (conservative). */
 export function getTpm(s: Settings): number {
@@ -167,7 +178,12 @@ export async function groqChat(
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]);
     await pace(s, reserved);
     try {
-      const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+      // Use CORS proxy if provider requires it (e.g., NaraRouter blocks direct browser calls)
+      const endpointUrl = provider.requiresProxy 
+        ? `${CORS_PROXY}${encodeURIComponent(`${provider.baseUrl}/chat/completions`)}`
+        : `${provider.baseUrl}/chat/completions`;
+      
+      const res = await fetch(endpointUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

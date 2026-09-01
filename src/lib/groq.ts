@@ -29,7 +29,11 @@ export interface ProviderInfo {
   keyUrl: string;
   blurb: string;
   models: { id: string; label: string }[];
+  requiresProxy?: boolean; // Flag to indicate if provider typically needs a CORS proxy
 }
+
+// CORS proxy for development (many AI providers block direct browser calls)
+const CORS_PROXY = "https://corsproxy.io/?";
 
 /** Free OpenAI-compatible providers. All four support /chat/completions with a Bearer key. */
 export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
@@ -88,7 +92,8 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     name: "NaraRouter",
     baseUrl: "https://router.bynara.id/v1",
     keyUrl: "https://console.bynara.id/keys",
-    blurb: "OpenAI-compatible gateway to 34+ models with 5M free tokens/day (no credit card required).",
+    blurb: "OpenAI-compatible gateway to 34+ models with 5M free tokens/day (no credit card required). May require CORS proxy for browser calls.",
+    requiresProxy: true, // NaraRouter blocks direct browser calls
     models: [
       { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash — fast, efficient (recommended)" },
       { id: "deepseek-chat", label: "DeepSeek Chat — balanced quality/speed" },
@@ -173,7 +178,12 @@ export async function groqChat(
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]);
     await pace(s, reserved);
     try {
-      const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+      // Use CORS proxy if provider requires it (e.g., NaraRouter blocks direct browser calls)
+      const endpointUrl = provider.requiresProxy 
+        ? `${CORS_PROXY}${encodeURIComponent(`${provider.baseUrl}/chat/completions`)}`
+        : `${provider.baseUrl}/chat/completions`;
+      
+      const res = await fetch(endpointUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

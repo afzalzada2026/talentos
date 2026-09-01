@@ -108,7 +108,7 @@ export default function SettingsDrawer({
                     >
                       <span className={`block text-[12.5px] font-bold ${active ? "text-pine-700" : "text-ink"}`}>{p.name}</span>
                       <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-ink3">
-                        {pid === "groq" ? "current default" : pid === "gemini" ? "1M context" : pid === "openrouter" ? "many models" : "groq-speed"}
+                        {pid === "groq" ? "current default" : pid === "gemini" ? "1M context" : pid === "openrouter" ? "many models" : pid === "cerebras" ? "groq-speed" : "5M tokens/day"}
                       </span>
                     </button>
                   );

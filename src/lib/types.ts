@@ -1,4 +1,4 @@
-export type ProviderId = "groq" | "gemini" | "openrouter" | "cerebras";
+export type ProviderId = "groq" | "gemini" | "openrouter" | "cerebras" | "nararouter";
 
 export interface Settings {
   provider: ProviderId;
